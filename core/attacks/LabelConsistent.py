@@ -418,9 +418,9 @@ class CreatePoisonedTargetDataset(DatasetFolder):
         if self.transform is None:
             self.poisoned_transform = Compose([])
         else:
-            self.poisoned_transform = copy.deepcopy(self.transform)
+            self.poisoned_transform = copy.deepcopy(self.transform) # self.transform 通用的transform
         self.poisoned_transform.transforms.insert(poisoned_transform_index, AddDatasetFolderTrigger(pattern, weight))
-
+        
     def __getitem__(self, index):
         """
         Args:
@@ -511,6 +511,7 @@ class LabelConsistent(Base):
             deterministic=deterministic)
         
         if poisoned_rate > 0:
+            # 生成对抗样本
             self.whole_adv_dataset, self.target_adv_dataset, poisoned_set = self._get_adv_dataset(
                 train_dataset,
                 adv_model=adv_model,
@@ -521,9 +522,9 @@ class LabelConsistent(Base):
                 steps=steps,
                 y_target=y_target,
                 poisoned_rate=poisoned_rate)
-
+            # 生成中毒样本
             self.poisoned_train_dataset = CreatePoisonedTargetDataset(
-                self.target_adv_dataset,
+                self.target_adv_dataset, # 目标类别的对抗样本数据集（对抗样本+原始样本）
                 poisoned_set,
                 pattern,
                 weight,
@@ -572,10 +573,10 @@ class LabelConsistent(Base):
                 device = torch.device("cpu")
 
 
-            adv_model = adv_model.to(device)
+            adv_model = adv_model.to(device) # adv_model:benign trained model
 
             backup_transform = deepcopy(dataset.transform)
-            dataset.transform = adv_transform
+            dataset.transform = adv_transform # Totensor
 
             data_loader = DataLoader(
                 dataset,
@@ -592,32 +593,33 @@ class LabelConsistent(Base):
 
             original_imgs = []
             perturbed_imgs = []
-            targets = []
+            targets = [] # 原封不动
 
             for batch in tqdm(data_loader):
                 # Adversarially perturb image. Note that torchattacks will automatically
                 # move `img` and `target` to the gpu where the attacker.model is located.
-                batch_img = batch[0]
+                batch_img = batch[0] # 像素0-1
                 batch_label = batch[1]
                 batch_img = batch_img.to(device)
                 batch_label = batch_label.to(device)
+                # 产生一个对抗性的扰动样本
                 img = attacker(batch_img, batch_label)
                 original_imgs.append(torch.round(batch_img * 255).to(dtype=torch.uint8).permute(0, 2, 3, 1).detach().cpu())
-                perturbed_imgs.append(img.permute(0, 2, 3, 1).detach().cpu())
+                perturbed_imgs.append(img.permute(0, 2, 3, 1).detach().cpu()) # BHWC
                 targets.append(batch_label.cpu())
 
-            dataset.transform = backup_transform
+            dataset.transform = backup_transform # 数据集原始的公共transforms
 
             original_imgs = torch.cat(original_imgs, dim=0).numpy()
             perturbed_imgs = torch.cat(perturbed_imgs, dim=0).numpy()
             targets = torch.cat(targets, dim=0).numpy()
 
-            y_target_index_list = np.squeeze(np.argwhere(targets == y_target))
+            y_target_index_list = np.squeeze(np.argwhere(targets == y_target)) # 目标类别样本index
             total_target_num = len(y_target_index_list)
             poisoned_num = int(total_target_num * poisoned_rate)
             assert poisoned_num >= 0, 'poisoned_num should greater than or equal to zero.'
             random.shuffle(y_target_index_list)
-            poisoned_set = frozenset(list(y_target_index_list[:poisoned_num]))
+            poisoned_set = frozenset(list(y_target_index_list[:poisoned_num])) # 从目标类别样本中选择一定比例的set
 
             for target in np.unique(targets):
                 os.makedirs(osp.join(adv_dataset_dir, 'whole_adv_dataset', str(target).zfill(2)), exist_ok=True)
@@ -639,7 +641,7 @@ class LabelConsistent(Base):
             _generate_adv_dataset(dataset, adv_model, adv_dataset_dir, adv_transform, eps, alpha, steps, y_target, poisoned_rate)
 
         whole_adv_dataset = DatasetFolder(
-            root=osp.join(adv_dataset_dir, 'whole_adv_dataset'),
+            root=osp.join(adv_dataset_dir, 'whole_adv_dataset'), # 整体数据集的对抗样本
             loader=my_imread,
             extensions=('png',),
             transform=deepcopy(dataset.transform),
@@ -648,7 +650,7 @@ class LabelConsistent(Base):
         )
 
         target_adv_dataset = DatasetFolder(
-            root=osp.join(adv_dataset_dir, 'target_adv_dataset'),
+            root=osp.join(adv_dataset_dir, 'target_adv_dataset'), # 目标类别数据集中的对抗样本（待中毒） + 干净样本
             loader=my_imread,
             extensions=('png',),
             transform=deepcopy(dataset.transform),
@@ -656,7 +658,7 @@ class LabelConsistent(Base):
             is_valid_file=None
         )
 
-        poisoned_set = np.load(osp.join(adv_dataset_dir, 'poisoned_set.npy'))
+        poisoned_set = np.load(osp.join(adv_dataset_dir, 'poisoned_set.npy')) # 中毒样本索引
         poisoned_set = frozenset(list(poisoned_set))
 
         return whole_adv_dataset, target_adv_dataset, poisoned_set

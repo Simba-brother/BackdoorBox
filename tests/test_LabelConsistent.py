@@ -154,6 +154,7 @@ transform_test = Compose([
 testset = dataset(datasets_root_dir, train=False, transform=transform_test, download=True)
 
 adv_model = core.models.ResNet(18)
+# 对抗目标模型（benign trained model）
 adv_ckpt = torch.load('/data/yamengxi/Backdoor/experiments/ResNet-18_CIFAR-10_Benign_2022-03-29_16:27:15/ckpt_epoch_200.pth')
 adv_model.load_state_dict(adv_ckpt)
 
@@ -220,11 +221,12 @@ poisoned_rate = 0.25
 label_consistent = core.LabelConsistent(
     train_dataset=trainset,
     test_dataset=testset,
-    model=core.models.ResNet(18),
+    model=core.models.ResNet(18), # blank model
     adv_model=adv_model,
+    # 存储对抗样本目录
     adv_dataset_dir=f'./adv_dataset/CIFAR-10_eps{eps}_alpha{alpha}_steps{steps}_poisoned_rate{poisoned_rate}_seed{global_seed}',
     loss=nn.CrossEntropyLoss(),
-    y_target=2,
+    y_target=2, # 设置攻击类别
     poisoned_rate=poisoned_rate,
     pattern=pattern,
     weight=weight,
